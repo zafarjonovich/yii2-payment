@@ -1,0 +1,10 @@
+{
+  "name": "zafarjonovich/yii2-payment",
+  "description": "Yii2 payment component",
+  "type": "library",
+  "autoload": {
+    "psr-4": {
+      "zafarjonovich\\Yii2Payment\\": "src"
+    }
+  }
+}
