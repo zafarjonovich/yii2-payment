@@ -55,28 +55,22 @@ class Controller extends GatewayController
                  */
                 $response = $event->sender;
 
-                $responseData = [
-                    'error' => null,
-                    'result' => null,
-                    'id' => $this->apiRequest->getParams()->hasAttribute('id') ? $this->apiRequest->getParams()->getId() : null
-                ];
-
                 $exception = \Yii::$app->errorHandler->exception;
 
-                if (null === $exception) {
-                    $responseData['result'] = $response->data;
-                } else {
+                if (null !== $exception) {
                     if (!($exception instanceof PaymentException)) {
                         $exception = new PaymentException($exception->getMessage());
                     }
-                    $responseData['error'] = [
-                        "code" => $exception->getStatusCode(),
-                        "message" => $exception->getErrorMessages(),
-                        "data" => []
+                    $response->data = [
+                        'error' => [
+                            "code" => $exception->getStatusCode(),
+                            "message" => $exception->getErrorMessages(),
+                            "data" => []
+                        ],
+                        'result' => null,
+                        'id' => $this->apiRequest->getParams()->hasAttribute('id') ? $this->apiRequest->getParams()->getId() : null
                     ];
                 }
-
-                $response->data = $responseData;
             }
         );
 
