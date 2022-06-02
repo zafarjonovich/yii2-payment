@@ -55,6 +55,8 @@ class Controller extends GatewayController
                  */
                 $response = $event->sender;
 
+                $error = null;
+
                 $exception = \Yii::$app->errorHandler->exception;
 
                 if (null !== $exception) {
@@ -62,16 +64,18 @@ class Controller extends GatewayController
                         $exception = new PaymentException($exception->getMessage());
                     }
 
-                    $response->data = [
-                        'error' => [
-                            "code" => $exception->getStatusCode(),
-                            "message" => $exception->getErrorMessages(),
-                            "data" => []
-                        ],
-                        'result' => null,
-                        'id' => $this->apiRequest->getParams()->hasAttribute('id') ? $this->apiRequest->getParams()->getId() : null
+                    $error = [
+                        "code" => $exception->getStatusCode(),
+                        "message" => $exception->getErrorMessages(),
+                        "data" => []
                     ];
                 }
+
+                $response->data = [
+                    'error' => $error,
+                    'result' => null,
+                    'id' => $this->apiRequest->getParams()->hasAttribute('id') ? $this->apiRequest->getParams()->getId() : null
+                ];
             }
         );
 
