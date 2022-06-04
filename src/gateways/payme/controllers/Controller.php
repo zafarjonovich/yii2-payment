@@ -63,19 +63,17 @@ class Controller extends GatewayController
                     if (!($exception instanceof PaymentException)) {
                         $exception = new PaymentException($exception->getMessage());
                     }
-                    
-                    $error = [
-                        "code" => $exception->getStatusCode(),
-                        "message" => $exception->getErrorMessages(),
-                        "data" => []
+
+                    $response->data = [
+                        'error' => [
+                            "code" => $exception->getStatusCode(),
+                            "message" => $exception->getErrorMessages(),
+                            "data" => []
+                        ],
+                        'result' => null,
+                        'id' => $this->apiRequest->getParams()->hasAttribute('id') ? $this->apiRequest->getParams()->getId() : null
                     ];
                 }
-
-                $response->data = [
-                    'error' => $error,
-                    'result' => null,
-                    'id' => $this->apiRequest->getParams()->hasAttribute('id') ? $this->apiRequest->getParams()->getId() : null
-                ];
             }
         );
 
