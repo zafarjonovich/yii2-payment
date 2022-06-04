@@ -9,6 +9,7 @@ use yii\validators\RequiredValidator;
 use yii\validators\SafeValidator;
 use yii\web\Response;
 use zafarjonovich\Yii2Payment\base\GatewayController;
+use zafarjonovich\Yii2Payment\gateways\gateways\payme\actions\ErrorAction;
 use zafarjonovich\Yii2Payment\gateways\payme\exceptions\CanNotPerformTransactionException;
 use zafarjonovich\Yii2Payment\gateways\payme\exceptions\MethodNotFoundException;
 use zafarjonovich\Yii2Payment\gateways\payme\exceptions\ParseException;
@@ -46,6 +47,7 @@ class Controller extends GatewayController
         \Yii::$app->request->parsers['application/json'] = 'yii\web\JsonParser';
         $this->enableCsrfValidation = false;
 
+
         \Yii::$app->response->on(
             Response::EVENT_BEFORE_SEND,
             function ($event) {
@@ -61,16 +63,19 @@ class Controller extends GatewayController
                     if (!($exception instanceof PaymentException)) {
                         $exception = new PaymentException($exception->getMessage());
                     }
-                    $response->data = [
-                        'error' => [
-                            "code" => $exception->getStatusCode(),
-                            "message" => $exception->getErrorMessages(),
-                            "data" => []
-                        ],
-                        'result' => null,
-                        'id' => $this->apiRequest->getParams()->hasAttribute('id') ? $this->apiRequest->getParams()->getId() : null
+                    
+                    $error = [
+                        "code" => $exception->getStatusCode(),
+                        "message" => $exception->getErrorMessages(),
+                        "data" => []
                     ];
                 }
+
+                $response->data = [
+                    'error' => $error,
+                    'result' => null,
+                    'id' => $this->apiRequest->getParams()->hasAttribute('id') ? $this->apiRequest->getParams()->getId() : null
+                ];
             }
         );
 
