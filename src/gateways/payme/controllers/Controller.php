@@ -3,6 +3,8 @@
 namespace zafarjonovich\Yii2Payment\gateways\payme\controllers;
 
 use yii\base\DynamicModel;
+use yii\filters\auth\CompositeAuth;
+use yii\filters\auth\HttpBasicAuth;
 use yii\filters\VerbFilter;
 use yii\helpers\VarDumper;
 use yii\validators\RequiredValidator;
@@ -10,7 +12,9 @@ use yii\validators\SafeValidator;
 use yii\web\Response;
 use zafarjonovich\Yii2Payment\base\GatewayController;
 use zafarjonovich\Yii2Payment\gateways\gateways\payme\actions\ErrorAction;
+use zafarjonovich\Yii2Payment\gateways\payme\base\Credential;
 use zafarjonovich\Yii2Payment\gateways\payme\exceptions\CanNotPerformTransactionException;
+use zafarjonovich\Yii2Payment\gateways\payme\exceptions\InsufficientPrivilegesException;
 use zafarjonovich\Yii2Payment\gateways\payme\exceptions\MethodNotFoundException;
 use zafarjonovich\Yii2Payment\gateways\payme\exceptions\ParseException;
 use zafarjonovich\Yii2Payment\gateways\payme\exceptions\PaymentException;
@@ -41,20 +45,25 @@ class Controller extends GatewayController
         throw new RequestParseException('Account method must set');
     }
 
+    /**
+     * @return Credential
+     * @throws PaymentException
+     */
+    public function getCredentials()
+    {
+        throw new PaymentException('Credentials not found');
+    }
+
     public function init()
     {
         \Yii::$app->response->format = Response::FORMAT_JSON;
         \Yii::$app->request->parsers['application/json'] = 'yii\web\JsonParser';
         $this->enableCsrfValidation = false;
 
-
         \Yii::$app->response->on(
             Response::EVENT_BEFORE_SEND,
             function ($event) {
-                /**
-                 * @var yii\base\Event $event
-                 * @var \yii\web\Response $response
-                 */
+
                 $response = $event->sender;
 
                 $exception = \Yii::$app->errorHandler->exception;
@@ -63,7 +72,7 @@ class Controller extends GatewayController
                     if (!($exception instanceof PaymentException)) {
                         $exception = new PaymentException($exception->getMessage());
                     }
-
+                    
                     $response->data = [
                         'error' => [
                             "code" => $exception->getStatusCode(),
@@ -80,17 +89,42 @@ class Controller extends GatewayController
         parent::init();
     }
 
+    public function checkPermission()
+    {
+        $authorization = $this->request->getHeaders()->get('authorization');
+
+
+
+        if (null === $authorization) {
+            throw new InsufficientPrivilegesException();
+        }
+
+        if (substr($authorization,0,6) != 'Basic ') {
+            throw new InsufficientPrivilegesException();
+        }
+
+        $base64 = substr($authorization,6);
+
+        $credentials = $this->getCredentials();
+
+        if ($base64 != base64_encode("{$credentials->getLogin()}:{$credentials->getPassword()}")) {
+            throw new InsufficientPrivilegesException();
+        }
+    }
+
     public function actionHook()
     {
         $request = Request::load();
         $methodName = "action{$request->getMethod()}";
 
         if (!$this->hasMethod($methodName)) {
-
             throw new MethodNotFoundException("{$request->getMethod()} method not found");
         }
 
         $this->apiRequest = $request;
+
+        $this->checkPermission();
+
         return $this->{$methodName}();
     }
 
