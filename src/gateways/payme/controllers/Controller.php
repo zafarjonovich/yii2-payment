@@ -190,7 +190,7 @@ class Controller extends GatewayController
                 'amount' => $amount,
                 'state' => Payment::STATE_WAITING,
                 'create_time' => time() * 1000,
-                'owner_id' => $ornerId,
+                'owner_id' => $ownerId,
             ]);
 
             $payment->save(false);
