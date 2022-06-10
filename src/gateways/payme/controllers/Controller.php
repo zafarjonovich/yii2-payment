@@ -36,20 +36,11 @@ class Controller extends GatewayController
 
     protected $timeout;
 
-    /**
-     * @param $account
-     * @return mixed
-     * @throws RequestParseException
-     */
     public function getOwnerIdByAccount($account)
     {
         throw new RequestParseException('Account method must set');
     }
 
-    /**
-     * @return Credential
-     * @throws PaymentException
-     */
     public function getCredentials()
     {
         throw new PaymentException('Credentials not found');
@@ -100,6 +91,16 @@ class Controller extends GatewayController
         parent::init();
     }
 
+    public function beforeAction($action)
+    {
+        $request = Request::load();
+        $this->apiRequest = $request;
+
+        $this->checkPermission();
+
+        return parent::beforeAction($action);
+    }
+
     public function checkPermission()
     {
         $authorization = $this->request->getHeaders()->get('authorization');
@@ -123,8 +124,7 @@ class Controller extends GatewayController
 
     public function actionHook()
     {
-        $request = Request::load();
-        $this->apiRequest = $request;
+        $request = $this->apiRequest;
 
         $methodName = "action{$request->getMethod()}";
 
@@ -132,24 +132,17 @@ class Controller extends GatewayController
             throw new MethodNotFoundException("{$request->getMethod()} method not found");
         }
 
-        $this->checkPermission();
-
         return $this->{$methodName}();
     }
 
-    /**
-     * @param $account
-     * @param $amount
-     * @return bool
-     */
-    protected function checkPerformTransaction($account,$amount)
+    protected function checkPerformTransaction($ownerId,$amount)
     {
         return true;
     }
 
     public function actionCheckPerformTransaction()
     {
-        $account = $this->getOwnerIdByAccount(
+        $ownerId = $this->getOwnerIdByAccount(
             $this->apiRequest->getParams()->getAccount()
         );
 
@@ -163,7 +156,7 @@ class Controller extends GatewayController
             throw new WrongAmountException();
         }
 
-        if (!$this->checkPerformTransaction($account,$amount)) {
+        if (!$this->checkPerformTransaction($ownerId,$amount)) {
             throw new WrongAmountException();
         }
 
@@ -176,11 +169,11 @@ class Controller extends GatewayController
     {
         $transactionId = $this->apiRequest->getParams()->getId();
         $amount = $this->apiRequest->getParams()->getAmount();
-        $ornerId = $this->getOwnerIdByAccount(
+        $ownerId = $this->getOwnerIdByAccount(
             $this->apiRequest->getParams()->getAccount()
         );
 
-        if (!$this->checkPerformTransaction($ornerId,$amount)) {
+        if (!$this->checkPerformTransaction($ownerId,$amount)) {
             throw new WrongAmountException();
         }
 
@@ -319,5 +312,6 @@ class Controller extends GatewayController
 
     public function actionChangePassword()
     {
+
     }
 }
