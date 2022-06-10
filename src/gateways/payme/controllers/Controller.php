@@ -2,6 +2,7 @@
 
 namespace zafarjonovich\Yii2Payment\gateways\payme\controllers;
 
+use Codeception\Util\HttpCode;
 use yii\base\DynamicModel;
 use yii\filters\auth\CompositeAuth;
 use yii\filters\auth\HttpBasicAuth;
@@ -66,23 +67,33 @@ class Controller extends GatewayController
 
                 $response = $event->sender;
 
+                $response->statusCode = 200;
+
                 $exception = \Yii::$app->errorHandler->exception;
+
+                $result = $response->data;
+                $error = null;
 
                 if (null !== $exception) {
                     if (!($exception instanceof PaymentException)) {
                         $exception = new PaymentException($exception->getMessage());
                     }
-                    
-                    $response->data = [
-                        'error' => [
-                            "code" => $exception->getStatusCode(),
-                            "message" => $exception->getErrorMessages(),
-                            "data" => []
-                        ],
-                        'result' => null,
-                        'id' => $this->apiRequest->getParams()->hasAttribute('id') ? $this->apiRequest->getParams()->getId() : null
+
+                    $error = [
+                        "code" => $exception->getStatusCode(),
+                        "message" => $exception->getErrorMessages(),
+                        "data" => []
                     ];
+
+                    $result = null;
                 }
+
+                $response->data = [
+                    'error' => $error,
+                    'result' => $result,
+                    'id' => $this->apiRequest->getParams()->hasAttribute('id') ? $this->apiRequest->getParams()->getId() : null
+                ];
+
             }
         );
 
@@ -92,8 +103,6 @@ class Controller extends GatewayController
     public function checkPermission()
     {
         $authorization = $this->request->getHeaders()->get('authorization');
-
-
 
         if (null === $authorization) {
             throw new InsufficientPrivilegesException();
@@ -115,22 +124,32 @@ class Controller extends GatewayController
     public function actionHook()
     {
         $request = Request::load();
+        $this->apiRequest = $request;
+
         $methodName = "action{$request->getMethod()}";
 
         if (!$this->hasMethod($methodName)) {
             throw new MethodNotFoundException("{$request->getMethod()} method not found");
         }
 
-        $this->apiRequest = $request;
-
         $this->checkPermission();
 
         return $this->{$methodName}();
     }
 
+    /**
+     * @param $account
+     * @param $amount
+     * @return bool
+     */
+    protected function checkPerformTransaction($account,$amount)
+    {
+        return true;
+    }
+
     public function actionCheckPerformTransaction()
     {
-        $this->getOwnerIdByAccount(
+        $account = $this->getOwnerIdByAccount(
             $this->apiRequest->getParams()->getAccount()
         );
 
@@ -141,6 +160,10 @@ class Controller extends GatewayController
         }
 
         if ($this->maxAmount && $this->maxAmount < $amount) {
+            throw new WrongAmountException();
+        }
+
+        if (!$this->checkPerformTransaction($account,$amount)) {
             throw new WrongAmountException();
         }
 
@@ -156,6 +179,10 @@ class Controller extends GatewayController
         $ornerId = $this->getOwnerIdByAccount(
             $this->apiRequest->getParams()->getAccount()
         );
+
+        if (!$this->checkPerformTransaction($ornerId,$amount)) {
+            throw new WrongAmountException();
+        }
 
         $payment = Payment::findOne(['transaction' => $transactionId]);
 
@@ -177,23 +204,23 @@ class Controller extends GatewayController
         }
 
         return [
-            "error" => null,
-            "result" => [
-                'create_time' => $payment->create_time,
-                'transaction' => $payment->id,
-                'state' => $payment->state,
-            ],
-            "id" => $this->apiRequest->getParams()->getId()
+            'create_time' => (int)$payment->create_time,
+            'transaction' => (string)$payment->id,
+            'state' => (int)$payment->state,
         ];
+    }
+
+    /**
+     * @param $ownerId
+     * @return void
+     */
+    protected function performTransaction($ownerId)
+    {
     }
 
     public function actionPerformTransaction()
     {
         $transactionId = $this->apiRequest->getParams()->getId();
-        $amount = $this->apiRequest->getParams()->getAmount();
-        $ornerId = $this->getOwnerIdByAccount(
-            $this->apiRequest->getParams()->getAccount()
-        );
 
         $payment = Payment::findOne(['transaction' => $transactionId]);
 
@@ -209,25 +236,30 @@ class Controller extends GatewayController
             $payment->perform_time = time() * 1000;
             $payment->state = Payment::STATE_SUCCESS;
             $payment->save(false);
+
+            $this->performTransaction($payment->owner_id);
         } else if (!$payment->stateIsSuccess()) {
             throw new CanNotPerformTransactionException();
         }
 
         return [
-            "error" => null,
-            "result" => [
-                "state" => $payment->state,
-                "perform_time" => $payment->perform_time,
-                "transaction" => $payment->id
-            ],
-            "id" => $this->apiRequest->getParams()->getId()
+            "state" => (int)$payment->state,
+            "perform_time" => (int)$payment->perform_time,
+            "transaction" => (string)$payment->id
         ];
+    }
+
+    /**
+     * @param $ownerId
+     * @return void
+     */
+    protected function cancelTransaction($ownerId)
+    {
     }
 
     public function actionCancelTransaction()
     {
         $transactionId = $this->apiRequest->getParams()->getId();
-        $reason = $this->apiRequest->getParams()->getReason();
 
         $payment = Payment::findOne(['transaction' => $transactionId]);
 
@@ -235,7 +267,10 @@ class Controller extends GatewayController
             throw new TransactionNotFoundException();
         }
 
+        $oldState = $payment->state;
+
         $payment->cancel_time = time() * 1000;
+        $payment->reason = $this->apiRequest->getParams()->getReason();
 
         if ($payment->stateIsWaiting()) {
             $payment->state = Payment::STATE_CANCELED_ON_WAITING;
@@ -247,14 +282,14 @@ class Controller extends GatewayController
 
         $payment->save(false);
 
+        if ($oldState != $payment->state) {
+            $this->cancelTransaction($payment->owner_id);
+        }
+
         return [
-            "error" => null,
-            "result" => [
-                "state" => $payment->state,
-                "cancel_time" => $payment->cancel_time,
-                "transaction" => $payment->id
-            ],
-            "id" => $this->apiRequest->getParams()->getId()
+            "state" => (int)$payment->state,
+            "cancel_time" => (int)$payment->cancel_time,
+            "transaction" => (string)$payment->id
         ];
     }
 
@@ -269,20 +304,20 @@ class Controller extends GatewayController
         }
 
         return [
-            "error" => null,
-            "result" => [
-                "create_time" => $payment->create_time,
-                "perform_time" => $payment->perform_time,
-                "cancel_time" => $payment->cancel_time,
-                "transaction" => $payment->id,
-                "state" => $payment->state,
-                "reason" => $payment->reason
-            ],
-            "id" => $this->apiRequest->getParams()->getId()
+            "create_time" =>(int) $payment->create_time,
+            "perform_time" => (int)$payment->perform_time,
+            "cancel_time" => (int)$payment->cancel_time,
+            "transaction" => (string)$payment->id,
+            "state" => (int)$payment->state,
+            "reason" => $payment->reason
         ];
     }
 
     public function actionGetStatement()
+    {
+    }
+
+    public function actionChangePassword()
     {
     }
 }
