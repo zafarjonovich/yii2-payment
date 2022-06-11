@@ -107,3 +107,40 @@ class PaymeController extends Controller
 }
 
 ```
+
+
+#### Ishlatish
+
+PAYME hamma so'rovlarini bitta url ga yuboradi. Bizning xolatda quyidagi url ga so'rovlarni yuborsa bo'ladi
+
+`https://api.domain.com/payme/hook`
+
+Agar siz so'rovning metodini boshqacha nomlamoqchi bo'lsangiz quyidagi ishni bajarishingiz kerak
+
+```php
+<?php
+
+namespace api\controllers;
+
+
+use common\models\Invoice;
+use zafarjonovich\Yii2Payment\gateways\payme\base\Credentials;
+use zafarjonovich\Yii2Payment\gateways\payme\controllers\Controller;
+use zafarjonovich\Yii2Payment\gateways\payme\exceptions\AccountNotFoundException;
+use zafarjonovich\Yii2Payment\gateways\payme\exceptions\RequestParseException;
+
+class PaymeController extends Controller
+{
+    ...
+    
+    public function actionUpdate(){
+        return parent::actionHook();
+    }
+    
+    ...
+}
+```
+
+Endi so'rovlarni quyidagicha ishlatsangiz bo'ladi
+
+`https://api.domain.com/payme/update`
