@@ -38,53 +38,12 @@ class Controller extends GatewayController
         throw new PaymentException('Credentials not found');
     }
 
-    public function init()
+    public function beforeAction($action)
     {
         \Yii::$app->response->format = Response::FORMAT_JSON;
         \Yii::$app->request->parsers['application/json'] = 'yii\web\JsonParser';
         $this->enableCsrfValidation = false;
 
-        \Yii::$app->response->on(
-            Response::EVENT_BEFORE_SEND,
-            function ($event) {
-
-                $response = $event->sender;
-
-                $response->statusCode = 200;
-
-                $exception = \Yii::$app->errorHandler->exception;
-
-                $result = $response->data;
-                $error = null;
-
-                if (null !== $exception) {
-                    if (!($exception instanceof PaymentException)) {
-                        $exception = new PaymentException($exception->getMessage());
-                    }
-
-                    $error = [
-                        "code" => $exception->getStatusCode(),
-                        "message" => $exception->getErrorMessages(),
-                        "data" => []
-                    ];
-
-                    $result = null;
-                }
-
-                $response->data = [
-                    'error' => $error,
-                    'result' => $result,
-                    'id' => $this->apiRequest->getParams()->hasAttribute('id') ? $this->apiRequest->getParams()->getId() : null
-                ];
-
-            }
-        );
-
-        parent::init();
-    }
-
-    public function beforeAction($action)
-    {
         $request = Request::load();
         $this->apiRequest = $request;
 
@@ -128,7 +87,25 @@ class Controller extends GatewayController
             throw new MethodNotFoundException("{$request->getMethod()} method not found");
         }
 
-        return $this->{$methodName}();
+        $requestId = $request->getParams()->hasAttribute('id') ? $request->getParams()->getId() : null;
+
+        try {
+            return [
+                'error' => null,
+                'result' => $this->{$methodName}(),
+                'id' => $requestId
+            ];
+        } catch (PaymentException $exception) {
+            return [
+                'error' => [
+                    "code" => $exception->getStatusCode(),
+                    "message" => $exception->getErrorMessages(),
+                    "data" => []
+                ],
+                'result' => null,
+                'id' => $requestId
+            ];
+        }
     }
 
     protected function checkPerformTransaction($ownerId,$amount)
