@@ -174,6 +174,9 @@ class Controller extends GatewayController
                 'owner_id' => $ownerId,
                 'state' => Payment::STATE_WAITING,
             ])
+            ->andWhere([
+                '!=', 'transaction', $transactionId
+            ])
             ->exists();
 
         if ($existWaitingPayment) {
@@ -186,20 +189,21 @@ class Controller extends GatewayController
 
         $payment = Payment::findOne(['transaction' => $transactionId]);
 
-        if (null !== $payment && !$payment->stateIsWaiting()) {
-            throw new CanNotPerformTransactionException('Transaction is canceled/paid');
+        if ($payment !== null) {
+            if (!$payment->stateIsWaiting()) {
+                throw new CanNotPerformTransactionException('Transaction is canceled/paid');
+            }
+        } else {
+            $payment = new Payment([
+                'transaction' => $transactionId,
+                'time' => $this->apiRequest->getParams()->getTime(),
+                'amount' => $amount,
+                'state' => Payment::STATE_WAITING,
+                'create_time' => time() * 1000,
+                'owner_id' => $ownerId,
+            ]);
+            $payment->save(false);
         }
-
-        $payment = new Payment([
-            'transaction' => $transactionId,
-            'time' => $this->apiRequest->getParams()->getTime(),
-            'amount' => $amount,
-            'state' => Payment::STATE_WAITING,
-            'create_time' => time() * 1000,
-            'owner_id' => $ownerId,
-        ]);
-
-        $payment->save(false);
 
         return [
             'create_time' => (int)$payment->create_time,
