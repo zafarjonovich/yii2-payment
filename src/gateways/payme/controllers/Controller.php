@@ -2,17 +2,9 @@
 
 namespace zafarjonovich\Yii2Payment\gateways\payme\controllers;
 
-use Codeception\Util\HttpCode;
-use yii\base\DynamicModel;
-use yii\filters\auth\CompositeAuth;
-use yii\filters\auth\HttpBasicAuth;
-use yii\filters\VerbFilter;
-use yii\helpers\VarDumper;
-use yii\validators\RequiredValidator;
-use yii\validators\SafeValidator;
+
 use yii\web\Response;
 use zafarjonovich\Yii2Payment\base\GatewayController;
-use zafarjonovich\Yii2Payment\gateways\gateways\payme\actions\ErrorAction;
 use zafarjonovich\Yii2Payment\gateways\payme\base\Credential;
 use zafarjonovich\Yii2Payment\gateways\payme\exceptions\CanNotPerformTransactionException;
 use zafarjonovich\Yii2Payment\gateways\payme\exceptions\InsufficientPrivilegesException;
@@ -21,9 +13,9 @@ use zafarjonovich\Yii2Payment\gateways\payme\exceptions\ParseException;
 use zafarjonovich\Yii2Payment\gateways\payme\exceptions\PaymentException;
 use zafarjonovich\Yii2Payment\gateways\payme\exceptions\RequestParseException;
 use zafarjonovich\Yii2Payment\gateways\payme\exceptions\TransactionNotFoundException;
+use zafarjonovich\Yii2Payment\gateways\payme\exceptions\WaitingPaymentAlreadyExistsException;
 use zafarjonovich\Yii2Payment\gateways\payme\exceptions\WrongAmountException;
 use zafarjonovich\Yii2Payment\models\Payment;
-use zafarjonovich\Yii2Payment\validators\HasAttributeValidator;
 use zafarjonovich\Yii2Payment\gateways\payme\base\Request;
 
 class Controller extends GatewayController
@@ -101,6 +93,10 @@ class Controller extends GatewayController
         return parent::beforeAction($action);
     }
 
+    /**
+     * @throws InsufficientPrivilegesException
+     * @throws PaymentException
+     */
     public function checkPermission()
     {
         $authorization = $this->request->getHeaders()->get('authorization');
@@ -173,28 +169,37 @@ class Controller extends GatewayController
             $this->apiRequest->getParams()->getAccount()
         );
 
+        $existWaitingPayment = Payment::find()
+            ->where([
+                'owner_id' => $ownerId,
+                'state' => Payment::STATE_WAITING,
+            ])
+            ->exists();
+
+        if ($existWaitingPayment) {
+            throw new WaitingPaymentAlreadyExistsException();
+        }
+
         if (!$this->checkPerformTransaction($ownerId,$amount)) {
             throw new WrongAmountException();
         }
 
         $payment = Payment::findOne(['transaction' => $transactionId]);
 
-        if (null !== $payment) {
-            if (!$payment->stateIsWaiting()) {
-                throw new CanNotPerformTransactionException('Transaction is canceled');
-            }
-        } else {
-            $payment = new Payment([
-                'transaction' => $transactionId,
-                'time' => $this->apiRequest->getParams()->getTime(),
-                'amount' => $amount,
-                'state' => Payment::STATE_WAITING,
-                'create_time' => time() * 1000,
-                'owner_id' => $ownerId,
-            ]);
-
-            $payment->save(false);
+        if (null !== $payment && !$payment->stateIsWaiting()) {
+            throw new CanNotPerformTransactionException('Transaction is canceled/paid');
         }
+
+        $payment = new Payment([
+            'transaction' => $transactionId,
+            'time' => $this->apiRequest->getParams()->getTime(),
+            'amount' => $amount,
+            'state' => Payment::STATE_WAITING,
+            'create_time' => time() * 1000,
+            'owner_id' => $ownerId,
+        ]);
+
+        $payment->save(false);
 
         return [
             'create_time' => (int)$payment->create_time,
@@ -215,7 +220,10 @@ class Controller extends GatewayController
     {
         $transactionId = $this->apiRequest->getParams()->getId();
 
-        $payment = Payment::findOne(['transaction' => $transactionId]);
+        $payment = Payment::findOne([
+            'transaction' => $transactionId,
+            'state' => Payment::STATE_WAITING,
+        ]);
 
         if (null === $payment) {
             throw new TransactionNotFoundException();
@@ -262,9 +270,6 @@ class Controller extends GatewayController
 
         $oldState = $payment->state;
 
-        $payment->cancel_time = time() * 1000;
-        $payment->reason = $this->apiRequest->getParams()->getReason();
-
         if ($payment->stateIsWaiting()) {
             $payment->state = Payment::STATE_CANCELED_ON_WAITING;
         }
@@ -273,11 +278,13 @@ class Controller extends GatewayController
             $payment->state = Payment::STATE_CANCELED_ON_SUCCESS;
         }
 
-        $payment->save(false);
-
         if ($oldState != $payment->state) {
+            $payment->cancel_time = time() * 1000;
+            $payment->reason = $this->apiRequest->getParams()->getReason();
             $this->cancelTransaction($payment->owner_id);
         }
+
+        $payment->save(false);
 
         return [
             "state" => (int)$payment->state,
