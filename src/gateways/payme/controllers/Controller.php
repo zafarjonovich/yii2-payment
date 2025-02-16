@@ -226,7 +226,6 @@ class Controller extends GatewayController
 
         $payment = Payment::findOne([
             'transaction' => $transactionId,
-            'state' => Payment::STATE_WAITING,
         ]);
 
         if (null === $payment) {
